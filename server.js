@@ -12,10 +12,12 @@ const multer = require("multer");
 const app = express();
 const prisma = new PrismaClient();
 
+// --- 1. GLOBAL CORS CONFIG ---
+// This allows your Vercel frontend to talk to this Render backend
 app.use(cors());
 app.use(express.json());
 
-// --- 1. CLOUDINARY CONFIG ---
+// --- 2. CLOUDINARY CONFIG ---
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -32,7 +34,7 @@ const storage = new CloudinaryStorage({
 
 const upload = multer({ storage: storage });
 
-// --- 2. MIDDLEWARE (The Bouncers) ---
+// --- 3. MIDDLEWARE (The Bouncers) ---
 
 // Admin Bouncer
 const authenticateToken = (req, res, next) => {
@@ -57,40 +59,44 @@ const authenticateCustomer = (req, res, next) => {
 
   jwt.verify(token, process.env.JWT_CUSTOMER_SECRET, (err, decoded) => {
     if (err) return res.status(403).json({ message: "Invalid token" });
-    req.customer = decoded; // Contains { id, email }
+    req.customer = decoded;
     next();
   });
 };
 
-// --- 3. AUTH ROUTES ---
+// --- 4. AUTH ROUTES ---
 
 // Admin Login
 app.post("/api/login", async (req, res) => {
-  const { email, password } = req.body;
-  const user = await prisma.user.findUnique({ where: { email } });
+  try {
+    const { email, password } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
 
-  if (!user)
-    return res
-      .status(401)
-      .json({ success: false, message: "Invalid Credentials" });
+    if (!user)
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid Credentials" });
 
-  const validPassword = await bcrypt.compare(password, user.password);
-  if (!validPassword)
-    return res
-      .status(401)
-      .json({ success: false, message: "Invalid Credentials" });
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword)
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid Credentials" });
 
-  const token = jwt.sign(
-    { userId: user.id, name: user.name },
-    process.env.JWT_SECRET,
-    { expiresIn: "24h" }
-  );
+    const token = jwt.sign(
+      { userId: user.id, name: user.name },
+      process.env.JWT_SECRET,
+      { expiresIn: "24h" }
+    );
 
-  res.json({
-    success: true,
-    token,
-    user: { name: user.name, email: user.email },
-  });
+    res.json({
+      success: true,
+      token,
+      user: { name: user.name, email: user.email },
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error during login" });
+  }
 });
 
 // Customer Register
@@ -111,7 +117,6 @@ app.post("/api/auth/register", async (req, res) => {
       process.env.JWT_CUSTOMER_SECRET
     );
 
-    // CRITICAL: We now send the 'id' back so the frontend can store it!
     res.status(201).json({
       success: true,
       token,
@@ -138,7 +143,6 @@ app.post("/api/auth/login", async (req, res) => {
       process.env.JWT_CUSTOMER_SECRET
     );
 
-    // CRITICAL: We now send the 'id' back!
     res.json({
       success: true,
       token,
@@ -149,7 +153,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// --- 4. PRODUCT ROUTES ---
+// --- 5. PRODUCT ROUTES ---
 
 app.get("/api/products", async (req, res) => {
   try {
@@ -189,9 +193,8 @@ app.post(
   }
 );
 
-// --- 5. ORDER ROUTES ---
+// --- 6. ORDER ROUTES ---
 
-// Place a New Order (Guest or Member)
 app.post("/api/orders", async (req, res) => {
   try {
     const { customerName, email, totalAmount, customerId } = req.body;
@@ -201,7 +204,6 @@ app.post("/api/orders", async (req, res) => {
         customerName,
         email,
         totalAmount: parseInt(totalAmount),
-        // Force the ID to a Number to match the Int field in schema
         customerId: customerId ? Number(customerId) : null,
       },
     });
@@ -213,7 +215,6 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// Fetch All Orders (Admin Only)
 app.get("/api/orders", authenticateToken, async (req, res) => {
   try {
     const orders = await prisma.order.findMany({
@@ -225,7 +226,6 @@ app.get("/api/orders", authenticateToken, async (req, res) => {
   }
 });
 
-// Fetch History for Logged-in Customer
 app.get("/api/customer/orders", authenticateCustomer, async (req, res) => {
   try {
     const orders = await prisma.order.findMany({
@@ -238,12 +238,14 @@ app.get("/api/customer/orders", authenticateCustomer, async (req, res) => {
   }
 });
 
-// Status Route
+// --- 7. START ENGINE ---
+
 app.get("/api/status", (req, res) => {
   res.json({ message: "DS Clothing Engine is LIVE!" });
 });
 
+// Render will provide a port via process.env.PORT
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server live on port ${PORT}`);
 });
